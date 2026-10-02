@@ -17,6 +17,8 @@ const errorHandler = require('./middleware/errorHandler');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// RecoverAI Production Server Configuration
+
 // Security & Middleware
 app.use(helmet({
   crossOriginResourcePolicy: false,
