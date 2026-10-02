@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "description": "RecoverAI — Intelligent Payment Revenue Recovery Platform",
   "main": "api/index.js",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
-    "build": "npm --prefix backend run prisma:generate && npm --prefix frontend run build",
-    "prisma:generate": "npm --prefix backend run prisma:generate",
-    "prisma:push": "npm --prefix backend run prisma:push",
-    "prisma:seed": "npm --prefix backend run prisma:seed",
+    "build": "npx prisma generate --schema=backend/prisma/schema.prisma && npm --prefix frontend run build",
+    "prisma:generate": "npx prisma generate --schema=backend/prisma/schema.prisma",
+    "prisma:push": "npx prisma db push --schema=backend/prisma/schema.prisma",
+    "prisma:seed": "node backend/prisma/seed.js",
     "test": "node --test tests/unit/recoveryEngine.test.js tests/integration/api.test.js"
   },
   "dependencies": {
