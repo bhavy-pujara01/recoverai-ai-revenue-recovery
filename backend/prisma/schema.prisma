@@ -1,0 +1,210 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Organization {
+  id                   String             @id @default(uuid())
+  name                 String
+  industry             String             @default("Fintech & SaaS")
+  slug                 String             @unique
+  currency             String             @default("INR")
+  timezone             String             @default("Asia/Kolkata")
+  autoRecoveryEnabled  Boolean            @default(true)
+  users                User[]
+  customers            Customer[]
+  transactions         Transaction[]
+  campaigns            RecoveryCampaign[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+  settings             OrgSettings?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           String       @default("ANALYST") // ADMIN, ANALYST, SUPPORT
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  avatar         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  auditLogs      AuditLog[]
+}
+
+model Customer {
+  id                     String        @id @default(uuid())
+  organizationId         String
+  organization           Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                   String
+  email                  String
+  phone                  String
+  businessName           String?
+  segment                String        @default("SME") // ENTERPRISE, MID_MARKET, SME, RETAIL
+  lifetimeValue          Float         @default(0)
+  totalTransactions      Int           @default(0)
+  successfulTransactions Int           @default(0)
+  failedTransactions     Int           @default(0)
+  recoveryRate           Float         @default(0)
+  churnRisk              String        @default("LOW") // LOW, MEDIUM, HIGH
+  paymentMethods         String        @default("[]") // JSON string of saved payment types
+  transactions           Transaction[]
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+model Transaction {
+  id                   String                  @id @default(uuid())
+  organizationId       String
+  organization         Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId           String
+  customer             Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  externalTxnId        String                  @unique
+  orderId              String
+  amount               Float
+  currency             String                  @default("INR")
+  status               String                  @default("FAILED") // FAILED, IN_RECOVERY, RECOVERED, ABANDONED, PENDING
+  failureCategory      String                  // TRANSIENT_GATEWAY, BANK_DECLINE, CUSTOMER_DROPOFF, MANDATE_ISSUE, BALANCE_LIMIT, FRAUD_RESTRICTION
+  rawFailureCode       String
+  failureReason        String
+  paymentMethod        String                  // UPI_INTENT, UPI_COLLECT, CREDIT_CARD, DEBIT_CARD, NET_BANKING, ENACH_MANDATE, WALLET
+  cardIssuer           String?
+  upiApp               String?
+  attemptCount         Int                     @default(0)
+  maxAllowedAttempts   Int                     @default(3)
+  lastAttemptAt        DateTime?
+  recoveredAt          DateTime?
+  metadata             String                  @default("{}") // JSON string for extra gateway telemetry
+  recommendation       RecoveryRecommendation?
+  recoveryAttempts     RecoveryAttempt[]
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  @@index([organizationId, status])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model RecoveryRecommendation {
+  id                     String      @id @default(uuid())
+  transactionId          String      @unique
+  transaction            Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  recoveryProbability    Float       // 0 - 100
+  priorityScore          String      // CRITICAL, HIGH, MEDIUM, LOW
+  priorityNumeric        Int         @default(50) // 0 - 100
+  expectedRecovery       Float
+  recommendedAction      String      // SMART_AUTO_RETRY, WHATSAPP_PAYMENT_LINK, SMS_PAYMENT_LINK, EMAIL_INVOICE_PROMPT, MANDATE_REAUTHORIZE, MANUAL_CALL_ESCALATION
+  recommendedChannel     String      // WHATSAPP, SMS, EMAIL, WEBHOOK_RETRY, IN_APP_POPUP, AGENT_OUTREACH
+  optimalRetryWindow     String
+  explanationReasons     String      // JSON array string of bullets
+  confidenceScore        Float       @default(88.5)
+  isExecuted             Boolean     @default(false)
+  generatedAt            DateTime    @default(now())
+}
+
+model RecoveryAttempt {
+  id                String            @id @default(uuid())
+  transactionId     String
+  transaction       Transaction       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  campaignId        String?
+  campaign          RecoveryCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  channel           String            // WHATSAPP, SMS, EMAIL, WEBHOOK_RETRY, IN_APP_POPUP, AGENT_OUTREACH
+  actionType        String            // AUTO_RETRY, SMART_LINK, INVOICE_REMINDER, REAUTH_MANDATE, MANUAL_CALL
+  status            String            @default("QUEUED") // QUEUED, SENT, DELIVERED, OPENED, CLICKED, COMPLETED_PAYMENT, FAILED, TIMED_OUT
+  responseTimeSecs  Int?
+  failureDetails    String?
+  metadata          String            @default("{}")
+  executedBy        String            @default("RecoverAI Engine")
+  createdAt         DateTime          @default(now())
+
+  @@index([transactionId])
+  @@index([campaignId])
+}
+
+model RecoveryCampaign {
+  id              String            @id @default(uuid())
+  organizationId  String
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String
+  description     String
+  status          String            @default("DRAFT") // DRAFT, SCHEDULED, RUNNING, COMPLETED, PAUSED
+  targetSegment   String            @default("ALL") // ALL, ENTERPRISE, MID_MARKET, SME, RETAIL, HIGH_RISK
+  minAmount       Float             @default(0)
+  maxAmount       Float             @default(1000000)
+  channels        String            @default("[\"WHATSAPP\", \"SMS\"]") // JSON array
+  actionWorkflow  String            @default("[]") // JSON array of sequence steps
+  totalAudience   Int               @default(0)
+  processedCount  Int               @default(0)
+  recoveredCount  Int               @default(0)
+  recoveredAmount Float             @default(0)
+  successRate     Float             @default(0)
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdBy       String            @default("System Admin")
+  attempts        RecoveryAttempt[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([organizationId, status])
+}
+
+model Notification {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  title          String
+  message        String
+  type           String       @default("RECOVERY_SUCCESS") // RECOVERY_SUCCESS, RECOVERY_FAILED, CAMPAIGN_COMPLETED, SYSTEM_ALERT, CRITICAL_TXN
+  isRead         Boolean      @default(false)
+  link           String?
+  metadata       String       @default("{}")
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, isRead])
+}
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName       String        @default("System")
+  userRole       String        @default("SYSTEM")
+  action         String        // LOGIN, GENERATE_RECOMMENDATION, EXECUTE_RECOVERY, CREATE_CAMPAIGN, LAUNCH_CAMPAIGN, UPDATE_SETTINGS, MARK_STATUS
+  entityType     String        // TRANSACTION, CAMPAIGN, CUSTOMER, SETTINGS, AUTH
+  entityId       String?
+  details        String        @default("{}") // JSON string of state diff or metadata
+  ipAddress      String?       @default("127.0.0.1")
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+model OrgSettings {
+  id                      String       @id @default(uuid())
+  organizationId          String       @unique
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  webhookUrl              String?      @default("https://api.bharatlogix.io/webhooks/recoverai")
+  webhookSecret           String?      @default("whsec_rec_live_894172a9b4")
+  retryWindowMinutes      Int          @default(45)
+  autoExecuteRecovery     Boolean      @default(false)
+  minConfidenceThreshold  Float        @default(75.0)
+  enabledChannels         String       @default("[\"WHATSAPP\", \"SMS\", \"EMAIL\", \"WEBHOOK_RETRY\"]")
+  slackWebhookUrl         String?      @default("https://hooks.slack.com/services/T00/B00/recoverai-alerts")
+  supportEmail            String       @default("ops@recoverai.in")
+  updatedAt               DateTime     @updatedAt
+}
