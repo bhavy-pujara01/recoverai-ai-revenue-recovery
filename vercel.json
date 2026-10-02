@@ -1,8 +1,5 @@
 {
-  "version": 2,
-  "buildCommand": "npx prisma generate --schema=backend/prisma/schema.prisma && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "npm install",
   "rewrites": [
     {
       "source": "/api/(.*)",
